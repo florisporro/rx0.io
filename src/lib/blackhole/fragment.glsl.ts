@@ -91,9 +91,9 @@ vec3 starLayer(vec3 d, float scale, float intensity) {
 vec3 background(vec3 d) {
 	vec3 col = starLayer(d, 55.0, 1.4) + starLayer(d, 110.0, 0.55);
 	// dim blue-grey nebula, barely there
-	float n = noise3(d * 2.4) * 0.62 + noise3(d * 5.3) * 0.38;
-	n = pow(max(n - 0.25, 0.0), 2.6);
-	col += n * vec3(0.10, 0.13, 0.24);
+	float n = noise3(d * 2.4 + u_time * 0.006) * 0.62 + noise3(d * 5.3 - u_time * 0.004) * 0.38;
+	n = pow(max(n - 0.22, 0.0), 2.4);
+	col += n * vec3(0.13, 0.16, 0.30);
 	col += vec3(0.004, 0.005, 0.009); // deep-space floor, not pure black
 	return col;
 }
@@ -117,8 +117,8 @@ vec4 disk(vec3 p, vec3 vdir) {
 	float ang = u_time * 0.35 * inversesqrt(r * r * r);
 	float ca = cos(ang), sa = sin(ang);
 	vec2 q = mat2(ca, -sa, sa, ca) * p.xz;
-	float n = fbm2(q * 1.15) * 0.65 + fbm2(q * 3.4 + 31.0) * 0.35;
-	n = 0.18 + 0.82 * pow(max(n, 0.0), 2.4);
+	float n = fbm2(q * 1.15 + u_time * 0.02) * 0.65 + fbm2(q * 3.4 + 31.0 - u_time * 0.03) * 0.35;
+	n = 0.12 + 0.88 * pow(max(n, 0.0), 2.6);
 
 	float density = rad * vert * n;
 
@@ -152,10 +152,12 @@ vec3 render(vec3 ro, vec3 rd) {
 	vec3 col = vec3(0.0);
 	float trans = 1.0;
 	bool captured = false;
+	float minR = 1e9;
 
 	for (int i = 0; i < MAX_STEPS; i++) {
 		float r2 = dot(p, p);
 		float r = sqrt(r2);
+		minR = min(minR, r);
 		if (r < R_S) { captured = true; break; }
 		if (r > ESCAPE_R && dot(p, v) > 0.0) break;
 
@@ -176,13 +178,21 @@ vec3 render(vec3 ro, vec3 rd) {
 	if (!captured && trans > 0.02) {
 		col += trans * background(normalize(v));
 	}
+
+	// faint cool halo hugging the shadow, from closest approach to the horizon
+	float glow = exp(-max(minR - R_S, 0.0) * 2.2);
+	col += vec3(0.30, 0.45, 0.85) * glow * 0.045 * trans;
 	return col;
 }
 
 // --- camera + post ----------------------------------------------------------
 
 void main() {
-	vec2 uv = (2.0 * gl_FragCoord.xy - u_res) / u_res.y;
+	// sub-pixel ray jitter, new pattern each frame: temporal dithering that
+	// smooths the hard horizon silhouette into fine noise under the film grain
+	vec2 jit = vec2(hash12(gl_FragCoord.xy + fract(u_time) * 71.3),
+	                hash12(gl_FragCoord.yx + fract(u_time) * 39.7)) - 0.5;
+	vec2 uv = (2.0 * (gl_FragCoord.xy + jit * 0.75) - u_res) / u_res.y;
 
 	// glacial orbit + slow bob above/below the disk plane; mouse adds a nudge
 	float orbA = 0.014 * u_time + 3.7 + u_mouse.x * 0.07;
@@ -203,7 +213,7 @@ void main() {
 
 	// vignette + film grain for the mood
 	col *= mix(0.42, 1.0, smoothstep(1.9, 0.5, length(uv)));
-	col += (hash12(gl_FragCoord.xy + fract(u_time) * vec2(157.0, 113.0)) - 0.5) * 0.035;
+	col += (hash12(gl_FragCoord.xy + fract(u_time) * vec2(157.0, 113.0)) - 0.5) * 0.045;
 
 	outColor = vec4(col, 1.0);
 }
