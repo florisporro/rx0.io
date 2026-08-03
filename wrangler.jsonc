@@ -9,5 +9,6 @@
 		"directory": ".svelte-kit/cloudflare"
 	},
 	"workers_dev": true,
-	"preview_urls": true
+	"preview_urls": true,
+	"routes": [{ "pattern": "rx0.io", "custom_domain": true }]
 }
