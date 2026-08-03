@@ -1,10 +1,17 @@
-// Generative ambient drone: detuned oscillators on an open chord
-// (root/fifth/ninth/octave — no thirds, so neither happy nor sad),
+// Generative ambient drone: detuned oscillators wandering a small set of
+// third-less chord shapes (sus/quartal/open — neither happy nor sad),
 // root slowly wandering a pentatonic set, plus filtered brown-noise
 // "space wind", all through a procedurally generated reverb.
 
-const ROOTS = [110.0, 130.81, 146.83, 164.81, 196.0]; // A2 pentatonic
-const INTERVALS = [1, 1.5, 2, 2.25]; // root, 5th, octave, 9th
+const ROOTS = [98.0, 110.0, 130.81, 146.83, 164.81, 196.0, 220.0]; // G2–A3 pentatonic
+// 4-voice frequency-ratio shapes, all thirdless (2nds/4ths/5ths/octaves only)
+const SHAPES = [
+	[1, 1.5, 2, 2.25], // open: root, 5th, oct, 9th
+	[1, 1.125, 1.5, 2], // sus2
+	[1, 4 / 3, 1.5, 2], // sus4
+	[1, 4 / 3, 16 / 9, 64 / 27], // quartal stack (4ths)
+	[1, 1.5, 2, 3] // bare fifths, wide
+];
 const MASTER_LEVEL = 0.16;
 
 // percussion grid: 16 steps per bar, one huge boom per bar (~4.8s),
@@ -20,8 +27,10 @@ let perc: GainNode | null = null;
 let noiseBuf: AudioBuffer | null = null;
 let whiteBuf: AudioBuffer | null = null;
 let oscs: OscillatorNode[] = [];
+let oscGains: GainNode[] = [];
 let padGain: GainNode | null = null;
 let rootIndex = 0;
+let shapeIndex = 0;
 let nextStep = 0;
 let stepCount = 0;
 let beatTimer: ReturnType<typeof setInterval> | undefined;
@@ -101,9 +110,10 @@ function build() {
 	padFilter.connect(padGain).connect(bus);
 	slowLfo(ctx, 0.045, 260, padFilter.frequency);
 
-	rootIndex = 0;
+	rootIndex = 1; // still start on A2
+	shapeIndex = 0;
 	const root = ROOTS[rootIndex];
-	for (const interval of INTERVALS) {
+	for (const interval of SHAPES[shapeIndex]) {
 		for (const detune of [-4, 4]) {
 			const osc = ctx.createOscillator();
 			osc.type = 'triangle';
@@ -114,6 +124,7 @@ function build() {
 			osc.connect(g).connect(padFilter);
 			osc.start();
 			oscs.push(osc);
+			oscGains.push(g);
 		}
 	}
 
@@ -214,15 +225,26 @@ function scheduleBeats() {
 	}
 }
 
-// wander to a neighbouring pentatonic root, switching exactly at time t
-// (with the boom). A fast pad dip cushions the cut; the reverb tail of the
-// old chord fills the gap.
+// wander to a neighbouring pentatonic root (and ~half the time a
+// neighbouring chord shape), switching exactly at time t (with the boom).
+// A fast pad dip cushions the cut; the reverb tail of the old chord fills
+// the gap.
 function driftChord(t: number) {
 	rootIndex = Math.max(0, Math.min(ROOTS.length - 1, rootIndex + (Math.random() < 0.5 ? -1 : 1)));
+	if (Math.random() < 0.5) {
+		shapeIndex = Math.max(
+			0,
+			Math.min(SHAPES.length - 1, shapeIndex + (Math.random() < 0.5 ? -1 : 1))
+		);
+	}
 	const root = ROOTS[rootIndex];
 	oscs.forEach((osc, i) => {
+		const interval = SHAPES[shapeIndex][Math.floor(i / 2)];
 		osc.frequency.cancelScheduledValues(t);
-		osc.frequency.setValueAtTime(root * INTERVALS[Math.floor(i / 2)], t);
+		osc.frequency.setValueAtTime(root * interval, t);
+		const vg = oscGains[i].gain;
+		vg.cancelScheduledValues(t);
+		vg.setValueAtTime(0.07 / Math.sqrt(interval), t); // higher voices quieter
 	});
 	const g = padGain!.gain;
 	g.cancelScheduledValues(t - 0.3);
